@@ -1,0 +1,178 @@
+{% extends "login.html" %}
+{% load static %}
+
+{% block content %}
+{% include "includes/navbar.html" %}
+
+<script>
+    var teamName = "{{ request.user.takim.ad }}";
+    var isMontajTakimi = (teamName === "Montaj Takımı");
+</script>
+
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="bg-dark text-white p-3">
+                <h4>Üretim Paneli</h4>
+                <hr>
+                <label for="ucakSecimi">Uçak Seçin:</label>
+                <select id="ucakSecimi" class="form-control" onchange="ucakSecildi()">
+                    <option value="" disabled selected>Uçak Seçin</option>
+                    {% for ucak in ucaklar %}
+                    <option value="{{ ucak.id }}">{{ ucak.ad }}</option>
+                    {% endfor %}
+                </select>
+                <br>
+
+                {% if request.user.takim.ad == "Montaj Takımı" %}
+                <button class="btn btn-info w-100 mt-3" onclick="listeleParcalar()">Parça Durumlarını Göster</button>
+                <div id="parca-durumlari" class="mt-3"></div>
+
+                <button class="btn btn-success w-100 mt-3" id="uretimBtn" onclick="montajUretimYap()" disabled>Uçak Üret</button>
+                {% endif %}
+                <div id="otherTeamSection">
+                    <label for="parcaSecimi">Parça Seçin:</label>
+                    <select id="parcaSecimi" class="form-control" disabled>
+                        <option value="" disabled selected>Önce Uçak Seçin</option>
+                    </select>
+                    <br>
+                    <button type="button" class="btn btn-primary" id="uretimBtn" onclick="uretimYap()" disabled>Üretimi Başlat</button>
+                </div>
+
+                <hr>
+                <!-- Durum Mesajı -->
+                <div id="message" style="display: none;">
+                    <h5>Durum:</h5>
+                    <p id="messageText"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.addEventListener("DOMContentLoaded", function () {
+        if (isMontajTakimi) {
+            document.getElementById("montajSection").style.display = "block";
+            document.getElementById("otherTeamSection").style.display = "none";
+        } else {
+            document.getElementById("montajSection").style.display = "none";
+            document.getElementById("otherTeamSection").style.display = "block";
+        }
+    });
+
+    function ucakSecildi() {
+        var ucakId = document.getElementById("ucakSecimi").value;
+        if (isMontajTakimi) {
+            // Montaj Takımı için: Uçak seçildiğinde "Parça Durumlarını Göster" butonunu aktif yap
+            document.getElementById("listeleBtn").disabled = false;
+            document.getElementById("montajUretimBtn").style.display = "none";
+            document.getElementById("message").style.display = "none";
+        } else {
+            // Diğer takımlar için: Parça dropdown'ını güncelle
+            var parcaSecimi = document.getElementById("parcaSecimi");
+            var uretimBtn = document.getElementById("uretimBtn");
+            if (!ucakId) {
+                parcaSecimi.innerHTML = '<option value="" disabled selected>Önce Uçak Seçin</option>';
+                parcaSecimi.disabled = true;
+                uretimBtn.disabled = true;
+                return;
+            }
+            fetch("/get_parcalar/" + ucakId + "/")
+                .then(response => response.json())
+                .then(data => {
+                    parcaSecimi.innerHTML = ""; // temizle
+                    if (data.parcalar.length === 0) {
+                        parcaSecimi.innerHTML = '<option disabled>Bu uçak için parça yok</option>';
+                        parcaSecimi.disabled = true;
+                        uretimBtn.disabled = true;
+                    } else {
+                        data.parcalar.forEach(function (parca) {
+                            var option = document.createElement("option");
+                            option.value = parca.id;
+                            option.textContent = parca.ad;
+                            parcaSecimi.appendChild(option);
+                        });
+                        parcaSecimi.disabled = false;
+                        uretimBtn.disabled = false;
+                    }
+                });
+        }
+    }
+
+    function listeleParcalar() {
+        var ucakId = document.getElementById("ucakSecimi").value;
+        if (!ucakId) {
+            alert("Lütfen önce bir uçak seçin!");
+            return;
+        }
+        fetch("{% url 'uretim_paneli' %}?ucak_id=" + ucakId, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'  
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                let content = "<h3>Parça Durumları</h3><ul>";
+                let eksikVar = false;
+                data.parcalar.forEach(function (item) {
+                    content += `<li>${item.ad} - Stok: ${item.stok}`;
+                    if (item.eksik) {
+                        content += " (Eksik)";
+                        eksikVar = true;
+                    }
+                    content += "</li>";
+                });
+                content += "</ul>";
+                if (eksikVar) {
+                    content += "<p class='text-danger'>Eksik parçalar var!</p>";
+                } else {
+                    content += "<p class='text-success'>Tüm parçalar mevcut.</p>";
+                }
+                document.getElementById("parca-durumlari").innerHTML = content;
+            })
+            .catch(error => console.error("Hata:", error));
+    }
+
+    function montajUretimYap() {
+        var ucakId = document.getElementById("ucakSecimi").value;
+        fetch("/montaj_uretim_yap/" + ucakId + "/")  
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);  
+                } else {
+                    document.getElementById("messageText").innerHTML = data.message;  
+                    document.getElementById("message").style.display = "block";
+                    // İşlem sonrası butonları resetle
+                    document.getElementById("uretimBtn").disabled = true; 
+                }
+            })
+            .catch(function (error) {
+                alert("Bir hata oluştu. Lütfen tekrar deneyin.");
+            });
+    }
+
+    function uretimYap() {
+        var parcaId = document.getElementById("parcaSecimi").value;
+        if (!parcaId) {
+            alert("Lütfen bir parça seçin!");
+            return;
+        }
+        fetch("/uretim_yap/" + parcaId + "/")
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                } else {
+                    document.getElementById("messageText").textContent = data.message;
+                    document.getElementById("message").style.display = "block";
+                }
+            })
+            .catch(function (error) {
+                alert("Bir hata oluştu. Lütfen tekrar deneyin.");
+            });
+    }
+</script>
+
+{% endblock %}
